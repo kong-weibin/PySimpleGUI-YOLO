@@ -9,8 +9,8 @@ import cv2
 import os
 import PySimpleGUI as sg
 
-i_vid = r'videos\car_chase_01.mp4'
-o_vid = r'output\car_chase_01_out.mp4'
+i_vid = r'/home/data/kongweibin/PySimpleGUI-YOLO/videos/car_chase_01.mp4'
+o_vid = r'/home/data/kongweibin/PySimpleGUI-YOLO/output/car_chase_01_out.mp4'
 y_path = r'yolo-coco'
 sg.theme('LightGreen')
 layout = 	[
@@ -39,6 +39,13 @@ args = values
 win.Close()
 
 
+# define color
+def get_color(idx):
+	idx = idx * 3
+	color = ((37 * idx) % 255, (17 * idx) % 255, (29 * idx) % 255)
+
+	return color
+	
 # imgbytes = cv2.imencode('.png', image)[1].tobytes()  # ditto
 gui_confidence = args["confidence"]
 gui_threshold = args["threshold"]
@@ -85,6 +92,8 @@ except:
 
 # loop over frames from the video file stream
 win_started = False
+# save track
+track = {}
 if use_webcam:
 	cap = cv2.VideoCapture(0)
 while True:
@@ -93,7 +102,9 @@ while True:
 		grabbed, frame = cap.read()
 	else:
 		grabbed, frame = vs.read()
-
+	frame = cv2.resize(frame, (500, 400))
+	orig_imgbytes = cv2.imencode('.png', frame)[1].tobytes()
+	
 	# if the frame was not grabbed, then we have reached the end
 	# of the stream
 	if not grabbed:
@@ -112,9 +123,12 @@ while True:
 	start = time.time()
 	layerOutputs = net.forward(ln)
 	end = time.time()
-
+	
 	# initialize our lists of detected bounding boxes, confidences,
 	# and class IDs, respectively
+	detection_boxes = []
+	detection_confidences = []
+	detection_IDS = []
 	boxes = []
 	confidences = []
 	classIDs = []
@@ -128,33 +142,64 @@ while True:
 			scores = detection[5:]
 			classID = np.argmax(scores)
 			confidence = scores[classID]
+			
+			# scale the bounding box coordinates back relative to
+			# the size of the image, keeping in mind that YOLO
+			# actually returns the center (x, y)-coordinates of
+			# the bounding box followed by the boxes' width and
+			# height
+			box = detection[0:4] * np.array([W, H, W, H])
+			(centerX, centerY, width, height) = box.astype("int")
 
+			# save cur frame coordinates
+			save_coord = []
+			
+			# use the center (x, y)-coordinates to derive the top
+			# and and left corner of the bounding box
+			x = int(centerX - (width / 2))
+			y = int(centerY - (height / 2))
+			
+			# detect 
+			detection_boxes.append([x, y, int(width), int(height)])
+			detection_confidences.append(float(confidence))
+			detection_IDS.append(classID)
+			
 			# filter out weak predictions by ensuring the detected
 			# probability is greater than the minimum probability
 			if confidence > gui_confidence:
-				# scale the bounding box coordinates back relative to
-				# the size of the image, keeping in mind that YOLO
-				# actually returns the center (x, y)-coordinates of
-				# the bounding box followed by the boxes' width and
-				# height
-				box = detection[0:4] * np.array([W, H, W, H])
-				(centerX, centerY, width, height) = box.astype("int")
-
-				# use the center (x, y)-coordinates to derive the top
-				# and and left corner of the bounding box
-				x = int(centerX - (width / 2))
-				y = int(centerY - (height / 2))
-
 				# update our list of bounding box coordinates,
-				# confidences, and class IDs
+				# confidences, and class IDs  and  track
 				boxes.append([x, y, int(width), int(height)])
 				confidences.append(float(confidence))
 				classIDs.append(classID)
+				tlwh = (x, y, int(width), int(height))
+				save_coord.append(tlwh)
+				if classID in track.keys():
+					track[classID].append(tlwh)
+				else:
+					track[classID] = save_coord
+	
 
 	# apply non-maxima suppression to suppress weak, overlapping
 	# bounding boxes
+	detection_idxs = cv2.dnn.NMSBoxes(detection_boxes, detection_confidences, 0, 0)
 	idxs = cv2.dnn.NMSBoxes(boxes, confidences, gui_confidence, gui_threshold)
+	
+	# for detect
+	if len(detection_idxs) > 0:
+		# loop over the indexes we are keeping
+		for i in detection_idxs.flatten():
+			# extract the bounding box coordinates
+			(x, y) = (detection_boxes[i][0], detection_boxes[i][1])
+			(w, h) = (detection_boxes[i][2], detection_boxes[i][3])
 
+			# draw a bounding box rectangle and label on the frame
+			color = [int(c) for c in COLORS[detection_IDS[i]]]
+			cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+			
+	detection_imgbytes = cv2.imencode('.png', frame)[1].tobytes()
+	
+	# for track
 	# ensure at least one detection exists
 	if len(idxs) > 0:
 		# loop over the indexes we are keeping
@@ -170,6 +215,13 @@ while True:
 				confidences[i])
 			cv2.putText(frame, text, (x, y - 5),
 				cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+		for track_id in track:
+			color = get_color(int(track_id))
+			for tlwh in track[track_id]:
+				x1, y1, w, h =  tuple(tlwh)
+				cv2.circle(frame, (int(x1 + 0.5 * w), int(y1 + h)), 2, color, thickness=2)
+
+
 	if write_to_disk:
 		#check if the video writer is None
 		if writer is None:
@@ -187,27 +239,66 @@ while True:
 
 		#write the output frame to disk
 		writer.write(frame)
-	imgbytes = cv2.imencode('.png', frame)[1].tobytes()  # ditto
+
+	track_imgbytes = cv2.imencode('.png', frame)[1].tobytes()  # ditto
 
 	if not win_started:
 		win_started = True
-		layout = [
-			[sg.Text('Yolo Playback in PySimpleGUI Window', size=(30,1))],
-			[sg.Image(data=imgbytes, key='_IMAGE_')],
-			[sg.Text('Confidence'),
-			 sg.Slider(range=(0, 1), orientation='h', resolution=.1, default_value=.5, size=(15, 15), key='confidence'),
-			sg.Text('Threshold'),
-			 sg.Slider(range=(0, 1), orientation='h', resolution=.1, default_value=.3, size=(15, 15), key='threshold')],
-			[sg.Exit()]
+		# 菜单布局
+		menu_layout = [
+			[sg.Text('Path to input video'), sg.In(i_vid,size=(40,1), key='input'), sg.FileBrowse()],
+			[sg.Text('Optional Path to output video'), sg.In(o_vid,size=(40,1), key='output'), sg.FileSaveAs()],
+			[sg.Text('Yolo base path'), sg.In(y_path,size=(40,1), key='yolo'), sg.FolderBrowse()],
+			[sg.Text('Confidence'), sg.Slider(range=(0,1),orientation='h', resolution=.1, default_value=.5, size=(15,15), key='confidence')],
+			[sg.Text('Threshold'), sg.Slider(range=(0,1), orientation='h', resolution=.1, default_value=.3, size=(15,15), key='threshold')],
+			[sg.Text(' '*8), sg.Checkbox('Use webcam', key='_WEBCAM_')],
+			[sg.Text(' '*8), sg.Checkbox('Write to disk', key='_DISK_')]
 		]
-		win = sg.Window('YOLO Output', layout,
+		# 原视频布局
+		orig_layout = [
+			[sg.Image(data=orig_imgbytes, size = (200, 200), key='-ORIG-')],
+			[sg.Text('Confidence'),
+			sg.Slider(range=(0, 1), orientation='h', resolution=.1, default_value=.5, size=(15, 15), key='confidence'),
+			sg.Text('Threshold'),
+			sg.Slider(range=(0, 1), orientation='h', resolution=.1, default_value=.3, size=(15, 15), key='threshold')]
+		]
+		# 检测布局
+		detection_layout = [
+			[sg.Image(data=detection_imgbytes, size = (200, 200), key='-DETECTION-')],
+			[sg.Text('Confidence'),
+			sg.Slider(range=(0, 1), orientation='h', resolution=.1, default_value=.5, size=(15, 15), key='confidence'),
+			sg.Text('Threshold'),
+			sg.Slider(range=(0, 1), orientation='h', resolution=.1, default_value=.3, size=(15, 15), key='threshold')]
+		]
+		# 跟踪布局
+		track_layout = [
+			[sg.Image(data=track_imgbytes, key='-TRACK-')],
+			[sg.Text('Confidence'),
+			sg.Slider(range=(0, 1), orientation='h', resolution=.1, default_value=.5, size=(15, 15), key='confidence'),
+			sg.Text('Threshold'),
+			sg.Slider(range=(0, 1), orientation='h', resolution=.1, default_value=.3, size=(15, 15), key='threshold')]
+			]
+		# 总布局
+		total_layout = [
+			[sg.Frame('menu_layout', menu_layout)],
+			[sg.Frame('orig_layout', track_layout), sg.Frame('detection_layout', detection_layout)]
+		]
+		total_layout = [[sg.Column(total_layout, element_justification = 'c')]]
+	
+		win = sg.Window('YOLO Output', total_layout,
 						default_element_size=(14, 1),
 						text_justification='right',
 						auto_size_text=False, finalize=True)
-		image_elem = win['_IMAGE_']
+		
+		#orig_image = win['-ORIG-']
+		detection_image = win['-DETECTION-']
+		image_elem = win['-TRACK-']
+		
 	else:
-		image_elem.Update(data=imgbytes)
-
+		#orig_image.Update(data=orig_imgbytes)
+		detection_image.Update(data=detection_imgbytes)
+		image_elem.Update(data=track_imgbytes)
+		
 	event, values = win.read(timeout=0)
 	if event is None or event == 'Exit':
 		break

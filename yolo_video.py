@@ -10,7 +10,7 @@ import cv2
 import os
 import PySimpleGUI as sg
 
-i_vid = r'videos\car_chase_01.mp4'
+i_vid = r'/home/data/kongweibin/PySimpleGUI-YOLO/videos/car_chase_01.mp4'
 # o_vid = r'videos\car_chase_01_out.mp4'
 y_path = r'yolo-coco'
 sg.theme('light green')
@@ -205,5 +205,5 @@ window.close()
 
 # release the file pointers
 print("[INFO] cleaning up...")
-writer.release()
+# writer.release()
 vs.release()

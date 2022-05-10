@@ -18,7 +18,7 @@ import PySimpleGUI as sg
 sg.theme('light green')
 layout = 	[
 		[sg.Text('YOLO')],
-		[sg.Text('Path to image'), sg.In(r'C:/Python/PycharmProjects/YoloObjectDetection/images/baggage_claim.jpg',size=(40,1), key='image'), sg.FileBrowse()],
+		[sg.Text('Path to image'), sg.In(r'/home/data/kongweibin/PySimpleGUI-YOLO/images/baggage_claim.jpg',size=(40,1), key='image'), sg.FileBrowse()],
 		[sg.Text('Yolo base path'), sg.In(r'yolo-coco',size=(40,1), key='yolo'), sg.FolderBrowse()],
 		[sg.Text('Confidence'), sg.Slider(range=(0,10),orientation='h', resolution=1, default_value=5, size=(15,15), key='confidence')],
 		[sg.Text('Threshold'), sg.Slider(range=(0,10), orientation='h', resolution=1, default_value=3, size=(15,15), key='threshold')],
